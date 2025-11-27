@@ -47,8 +47,10 @@ def main():
         if not os.path.isdir(path):
             os.mkdir(path)
 
-        #  games_path = load_games(path)
-        eval_games(path + "\games", path, stockfish_path)
+        games_path = os.getenv("GAMES_PATH")
+        if not os.path.isdir(games_path):
+            games_path = load_games(path)
+        eval_games(games_path, path, stockfish_path)
     else:
         print("CHESS_USER není nastaven v .env souboru.")
 
