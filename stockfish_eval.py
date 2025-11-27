@@ -42,12 +42,12 @@ def analyze_game(args):
     stockfish.update_engine_parameters({"Threads": int(os.getenv("STOCKFISH_THREADS", 1))})
     game_pgn = chess.pgn.read_game(io.StringIO(pgn))
     board = game_pgn.board()
-
     moves_analyzed = eval_pgn(game_pgn, board, stockfish, game.get("as_white", True))
 
     del game["pgn"]
-    game["games_analyzed"] = moves_analyzed
     game.update(analyze_castling(game.get("as_white", True), game_pgn))
+    game["total_moves"] = board.fullmove_number
+    game["games_analyzed"] = moves_analyzed
     return game
 
 
