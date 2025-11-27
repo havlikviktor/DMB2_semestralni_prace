@@ -1,4 +1,6 @@
 import os
+import random
+import time
 from datetime import datetime
 from multiprocessing import Pool
 
@@ -11,8 +13,7 @@ from tqdm import tqdm
 def fetch_chess_games(username, path):
     games_count = 0
     url = f"https://api.chess.com/pub/player/{username}/games/archives"
-    headers = {"User-Agent": "MyChessStats/1.0"}
-    response = requests.get(url, headers=headers)
+    response = send_request(url)
 
     if response.status_code == 200:
         archives = response.json().get("archives", [])
@@ -35,8 +36,7 @@ def proces_archive(archive_url, archive_path, username):
     print(f"Načítám archiv {archive_url}")
     games = []
 
-    headers = {"User-Agent": "MyChessStats/1.0"}
-    archive_response = requests.get(archive_url, headers=headers)
+    archive_response = send_request(archive_url)
 
     if archive_response.status_code == 200:
         games_list = archive_response.json().get("games", [])
@@ -117,12 +117,11 @@ def get_eco_code(pgn_string: str) -> str:
 
 def get_opponent_country(opponent):
     opponent_url = opponent.get("@id", "")
-    headers = {"User-Agent": "MyChessStats/1.0"}
 
-    opponent_response = requests.get(opponent_url, headers=headers)
+    opponent_response = send_request(opponent_url)
     if opponent_response.status_code == 200:
         country_url = opponent_response.json().get("country", "")
-        country_response = requests.get(country_url, headers=headers)
+        country_response = send_request(country_url)
         if country_response.status_code == 200:
             return country_response.json().get("name", "Unknown")
         else:
@@ -130,3 +129,16 @@ def get_opponent_country(opponent):
     else:
         print(f"Chyba při načítání oponenta: {opponent_url}. Status: {opponent_response.status_code}")
     return "Unknown"
+
+
+def send_request(url):
+    headers = {"User-Agent": "MyChessStats/1.0"}
+    response = requests.get(url, headers=headers)
+
+    while response.status_code == 429:
+        sleep_time = int(os.getenv("FETCH_RETRY_WAIT_TIME", 1000))
+        sleep_time_r = random.randint(sleep_time, 2 * sleep_time)
+        time.sleep(sleep_time_r / 1000)
+        response = requests.get(url, headers=headers)
+
+    return response
