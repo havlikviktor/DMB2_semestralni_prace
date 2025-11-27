@@ -22,7 +22,7 @@ def fetch_chess_games(username, path):
             archive_path = os.path.join(path, f"{archive_date[-2]}_{archive_date[-1]}_blitz_180.json")
 
             if os.path.isfile(archive_path):
-                print(f"Archiv {archive_url} již existuje, přeskočeno.")
+                print(f"Archiv {archive_url} již načten, přeskočeno.")
             else:
                 games_count += proces_archive(archive_url, archive_path, username)
 

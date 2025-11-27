@@ -9,12 +9,29 @@ from stockfish import Stockfish
 from tqdm import tqdm
 
 
-def analyze_games(games_file, stockfish_path, output_file):
+def analyze_archives(archives_path, analyzed_path, stockfish_path):
+    games_count = 0
+    files_done = 0
+    for archive in reversed(os.listdir(archives_path)):
+        print(f"Souborů k analýze: {len(os.listdir(archives_path))} Zbývá: {len(os.listdir(archives_path)) - files_done}"
+              f". Partií zpracováno: {games_count}.")
+        if archive.endswith(".json"):
+            archive_file = os.path.join(archives_path, archive)
+            games_analyzed_file = os.path.join(analyzed_path, f"analyzed_{archive}")
+            if os.path.isfile(games_analyzed_file):
+                print(f"Soubor {games_analyzed_file} již analyzován, přeskočeno.")
+            else:
+                games_count += analyze_archive(archive_file, stockfish_path=stockfish_path, output_file=games_analyzed_file)
+        files_done += 1
+    return games_count
+
+
+def analyze_archive(games_file, stockfish_path, output_file):
+    print(f"Analyzuji archiv {games_file}")
     with open(games_file, "r", encoding="utf-8") as f:
         games_list = json.load(f)
 
     args_list = [(game, stockfish_path) for game in games_list]
-
     num_processes = min(int(os.getenv("ANALYSIS_PROCESSES_COUNT", 1)), cpu_count())
 
     with tqdm(total=len(args_list), desc="\033[92mAnalyzing games", unit="game") as pbar:
@@ -28,7 +45,6 @@ def analyze_games(games_file, stockfish_path, output_file):
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
-    print(f"Analýza {games_file} Dokončena.")
     return len(results)
 
 
@@ -52,27 +68,6 @@ def analyze_game(args):
     return game
 
 
-def clk_to_seconds(clk_str):
-    parts = clk_str.split(":")
-    if len(parts) == 3:
-        h, m, s = parts
-    elif len(parts) == 2:
-        h = 0
-        m, s = parts
-    else:
-        return None
-    return round(int(h)*3600 + int(m)*60 + float(s), 2)
-
-
-def parse_clk(comment):
-    if not comment:
-        return None
-    clk = re.search(r"\[%clk ([\d:.]+)\]", comment)
-    if clk:
-        return clk_to_seconds(clk.group(1))
-    return None
-
-
 def eval_pgn(game_pgn, board, stockfish, as_white):
     moves = []
     last_eval = 0
@@ -92,7 +87,7 @@ def eval_pgn(game_pgn, board, stockfish, as_white):
         player = "w" if board.turn == chess.WHITE else "b"
         if clk is not None:
             if last_clk[player] is not None:
-                move_time = last_clk[player] - clk
+                move_time = round(last_clk[player] - clk, 2)
             else:
                 move_time = int(os.getenv("FETCH_TIME_CONTROL", 180)) - clk
         else:
@@ -146,6 +141,27 @@ def analyze_castling(as_white, game_pgn):
             meta[key] = True
         board.push(move)
     return meta
+
+
+def clk_to_seconds(clk_str):
+    parts = clk_str.split(":")
+    if len(parts) == 3:
+        h, m, s = parts
+    elif len(parts) == 2:
+        h = 0
+        m, s = parts
+    else:
+        return None
+    return int(h)*3600 + int(m)*60 + float(s)
+
+
+def parse_clk(comment):
+    if not comment:
+        return None
+    clk = re.search(r"\[%clk ([\d:.]+)\]", comment)
+    if clk:
+        return clk_to_seconds(clk.group(1))
+    return None
 
 
 def transform_eval(eval_dict, as_white, board):

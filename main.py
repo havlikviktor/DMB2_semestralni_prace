@@ -17,26 +17,12 @@ def load_games(path):
     return path
 
 
-def eval_games(games_path, path, stockfish_path):
-    path = os.path.join(path, "games_analysed")
-    if not os.path.isdir(path):
-        os.mkdir(path)
+def analyze_games(games_path, path, stockfish_path):
+    analyzed_path = os.path.join(path, "games_analysed")
+    if not os.path.isdir(analyzed_path):
+        os.mkdir(analyzed_path)
 
-    games_count = 0
-    files_done = 0
-    for file in os.listdir(games_path):
-        print(f"Souborů k analýze: {len(os.listdir(games_path))} Zbývá: {len(os.listdir(games_path)) - files_done}"
-              f". Partií zpracováno: {games_count}.")
-        if file.endswith(".json"):
-            games_file = os.path.join(games_path, file)
-            games_analyzed_file = os.path.join(path, f"analyzed_{file}")
-            if os.path.isfile(games_analyzed_file):
-                print(f"Soubor {games_analyzed_file} již existuje, přeskočeno.")
-            else:
-                games_count += stockfish_eval.analyze_games(games_file, stockfish_path=stockfish_path,
-                                                            output_file=games_analyzed_file)
-        files_done += 1
-
+    games_count = stockfish_eval.analyze_archives(games_path, analyzed_path, stockfish_path)
     print(f"Her analyzováno: {games_count}.")
 
 
@@ -50,7 +36,7 @@ def main():
         games_path = os.getenv("GAMES_PATH")
         if not os.path.isdir(games_path):
             games_path = load_games(path)
-        eval_games(games_path, path, stockfish_path)
+        analyze_games(games_path, path, stockfish_path)
     else:
         print("CHESS_USER není nastaven v .env souboru.")
 
