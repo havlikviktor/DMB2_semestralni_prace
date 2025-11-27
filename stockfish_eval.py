@@ -71,7 +71,7 @@ def analyze_game(args):
 def eval_pgn(game_pgn, board, stockfish, as_white):
     moves = []
     last_eval = 0
-    last_clk = {"w": None, "b": None}
+    clock = {"w": None, "b": None}
 
     stockfish.set_fen_position(board.fen())
     for node in game_pgn.mainline():
@@ -81,19 +81,10 @@ def eval_pgn(game_pgn, board, stockfish, as_white):
         best_move_piece = get_piece_symbol(board, best_move_uci)
         moved_piece = get_piece_symbol(board, move_uci)
         is_best_moved_piece = chess.Move.from_uci(move_uci).from_square == chess.Move.from_uci(best_move_uci).from_square
+        pieces_on_board = len(board.piece_map())
 
-        # čas na hodinách
-        clk = parse_clk(node.comment)
         player = "w" if board.turn == chess.WHITE else "b"
-        if clk is not None:
-            if last_clk[player] is not None:
-                move_time = round(last_clk[player] - clk, 2)
-            else:
-                move_time = int(os.getenv("FETCH_TIME_CONTROL", 180)) - clk
-        else:
-            move_time = None
-        if clk is not None:
-            last_clk[player] = clk
+        move_time = analyze_clock(node.comment, clock, player)
 
         board.push(move)
         stockfish.set_fen_position(board.fen())
@@ -104,6 +95,7 @@ def eval_pgn(game_pgn, board, stockfish, as_white):
             "move_order": len(moves) + 1,
             "pos_eval": pos_eval,
             "move_eval_change": pos_eval - last_eval,
+            "pieces_on_board": pieces_on_board,
             "mate_possible": stockfish_eval["type"] == "mate",
             "mate_in_moves": abs(stockfish_eval["value"]) if stockfish_eval["type"] == "mate" else 0,
             "moved_piece": moved_piece,
@@ -111,8 +103,8 @@ def eval_pgn(game_pgn, board, stockfish, as_white):
             "is_best_move": move.uci() == best_move_uci,
             "is_best_moved_piece": is_best_moved_piece,
             "time_used_sec": move_time,
-            "time_on_clock_sec": clk,
-            "player": player
+            "time_on_clock_sec": clock[player],
+            "player": player,
         })
         last_eval = pos_eval
 
@@ -143,6 +135,20 @@ def analyze_castling(as_white, game_pgn):
     return meta
 
 
+def analyze_clock(comment, clock, player):
+    clk = parse_clk(comment)
+    if clk is not None:
+        if clock[player] is not None:
+            move_time = round(clock[player] - clk, 2)
+        else:
+            move_time = int(os.getenv("FETCH_TIME_CONTROL", 180)) - clk
+    else:
+        move_time = None
+    if clk is not None:
+        clock[player] = clk
+    return move_time
+
+
 def clk_to_seconds(clk_str):
     parts = clk_str.split(":")
     if len(parts) == 3:
@@ -158,7 +164,7 @@ def clk_to_seconds(clk_str):
 def parse_clk(comment):
     if not comment:
         return None
-    clk = re.search(r"\[%clk ([\d:.]+)\]", comment)
+    clk = re.search(r"\[%clk ([\d:.]+)]", comment)
     if clk:
         return clk_to_seconds(clk.group(1))
     return None
@@ -189,5 +195,3 @@ def get_piece_symbol(board, move_uci):
     if move_uci:
         return board.piece_at(chess.Move.from_uci(move_uci).from_square).symbol().upper()
     return None
-
-
