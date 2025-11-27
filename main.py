@@ -37,7 +37,7 @@ def eval_games(games_path, path, stockfish_path):
                                                             output_file=games_analyzed_file)
         files_done += 1
 
-    print(f"Analýza {games_count} her dokončena.")
+    print(f"Her analyzováno: {games_count}.")
 
 
 def main():

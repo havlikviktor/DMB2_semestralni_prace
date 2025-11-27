@@ -60,7 +60,7 @@ def process_game(args: (dict, str)):
     time_class = game.get("time_class", "")
     game_url = game.get("url", "")
 
-    if time_class == "blitz" and tc == "180":
+    if time_class == "blitz" and tc == os.getenv("FETCH_TIME_CONTROL", "180"):
         eco = get_eco_code(game.get("pgn", ""))
         pgn = strip_pgn_tags(game.get("pgn", ""))
         day_hour = datetime.fromtimestamp(game.get("end_time", 0)).hour

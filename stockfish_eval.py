@@ -1,6 +1,7 @@
 import json
 import io
 import os
+import re
 from multiprocessing import Pool, cpu_count
 import chess
 import chess.pgn
@@ -51,9 +52,32 @@ def analyze_game(args):
     return game
 
 
+def clk_to_seconds(clk_str):
+    parts = clk_str.split(":")
+    if len(parts) == 3:
+        h, m, s = parts
+    elif len(parts) == 2:
+        h = 0
+        m, s = parts
+    else:
+        return None
+    return round(int(h)*3600 + int(m)*60 + float(s), 2)
+
+
+def parse_clk(comment):
+    if not comment:
+        return None
+    clk = re.search(r"\[%clk ([\d:.]+)\]", comment)
+    if clk:
+        return clk_to_seconds(clk.group(1))
+    return None
+
+
 def eval_pgn(game_pgn, board, stockfish, as_white):
     moves = []
     last_eval = 0
+    last_clk = {"w": None, "b": None}
+
     stockfish.set_fen_position(board.fen())
     for node in game_pgn.mainline():
         move = node.move
@@ -62,22 +86,38 @@ def eval_pgn(game_pgn, board, stockfish, as_white):
         best_move_piece = get_piece_symbol(board, best_move_uci)
         moved_piece = get_piece_symbol(board, move_uci)
         is_best_moved_piece = chess.Move.from_uci(move_uci).from_square == chess.Move.from_uci(best_move_uci).from_square
+
+        # čas na hodinách
+        clk = parse_clk(node.comment)
+        player = "w" if board.turn == chess.WHITE else "b"
+        if clk is not None:
+            if last_clk[player] is not None:
+                move_time = last_clk[player] - clk
+            else:
+                move_time = int(os.getenv("FETCH_TIME_CONTROL", 180)) - clk
+        else:
+            move_time = None
+        if clk is not None:
+            last_clk[player] = clk
+
         board.push(move)
         stockfish.set_fen_position(board.fen())
         stockfish_eval = stockfish.get_evaluation()
-
         pos_eval = transform_eval(stockfish_eval, as_white, board)
 
         moves.append({
             "move_order": len(moves) + 1,
             "pos_eval": pos_eval,
             "move_eval_change": pos_eval - last_eval,
-            "is_mate": stockfish_eval["type"] == "mate",
+            "mate_possible": stockfish_eval["type"] == "mate",
             "mate_in_moves": abs(stockfish_eval["value"]) if stockfish_eval["type"] == "mate" else 0,
             "moved_piece": moved_piece,
             "best_move_piece": best_move_piece,
             "is_best_move": move.uci() == best_move_uci,
             "is_best_moved_piece": is_best_moved_piece,
+            "time_used_sec": move_time,
+            "time_on_clock_sec": clk,
+            "player": player
         })
         last_eval = pos_eval
 
