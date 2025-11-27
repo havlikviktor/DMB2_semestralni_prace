@@ -127,5 +127,5 @@ def get_opponent_country(opponent):
         else:
             print(f"Chyba při načítání země: {country_url}. Status: {country_response.status_code}")
     else:
-        print(f"Chyba při načítání oponenta: {opponent_url}. Status: {opponent_url.status_code}")
+        print(f"Chyba při načítání oponenta: {opponent_url}. Status: {opponent_response.status_code}")
     return "Unknown"
