@@ -58,6 +58,7 @@ def process_game(args: (dict, str)):
     game, username = args
     tc = game.get("time_control", "")
     time_class = game.get("time_class", "")
+    game_url = game.get("url", "")
 
     if time_class == "blitz" and tc == "180":
         eco = get_eco_code(game.get("pgn", ""))
@@ -80,7 +81,7 @@ def process_game(args: (dict, str)):
             opponent_result = white.get("result", "")
 
         return {
-
+            "game_url": game_url,
             "pgn": pgn,
             "eco": eco,
             "day_hour": day_hour,
