@@ -64,7 +64,7 @@ def analyze_game(args):
     del game["pgn"]
     game.update(analyze_castling(game.get("as_white", True), game_pgn))
     game["total_moves"] = board.fullmove_number
-    game["games_analyzed"] = moves_analyzed
+    game["moves_analyzed"] = moves_analyzed
     return game
 
 
@@ -141,7 +141,7 @@ def analyze_clock(comment, clock, player):
         if clock[player] is not None:
             move_time = round(clock[player] - clk, 2)
         else:
-            move_time = int(os.getenv("FETCH_TIME_CONTROL", 180)) - clk
+            move_time = round(int(os.getenv("FETCH_TIME_CONTROL", 180)) - clk)
     else:
         move_time = None
     if clk is not None:
