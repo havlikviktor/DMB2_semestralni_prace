@@ -4,6 +4,7 @@ import glob
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 import seaborn as sns
 from scipy.stats import pearsonr
 
@@ -151,25 +152,29 @@ def analyze_game_phases(df_moves):
     plt.tight_layout()
     plt.show()
     
-    # Critical Piece Analysis
-    print("\n--- Critical Pieces by Phase (Worst Avg Eval Change) ---")
-    for phase in ['Opening', 'Middlegame', 'Endgame']:
+    phases = ['Opening', 'Middlegame', 'Endgame']
+    fig, axes = plt.subplots(3, 1, figsize=(10, 15))
+    
+    for i, phase in enumerate(phases):
+        ax = axes[i]
         phase_data = player_moves[player_moves['phase'] == phase]
-        if phase_data.empty:
-            continue
-        piece_stats = phase_data.groupby('moved_piece')['move_eval_change'].mean().sort_values()
-        print(f"\n{phase}:")
-        print(piece_stats.head(3)) # Show top 3 worst performing pieces
         
-        # Plot for each phase
-        plt.figure(figsize=(8, 5))
-        sns.barplot(x=piece_stats.index, y=piece_stats.values, hue=piece_stats.index, palette='Reds_r', legend=False)
-        plt.xticks(rotation=45, ha='right')
-        plt.title(f"Piece Performance in {phase} (Avg Eval Change)")
-        plt.xlabel("Piece")
-        plt.ylabel("Avg Eval Change")
-        plt.tight_layout()
-        plt.show()
+        if phase_data.empty:
+            ax.text(0.5, 0.5, "No Data", ha='center', va='center')
+            ax.set_title(f"{phase} (No Data)")
+            continue
+            
+        piece_stats = phase_data.groupby('moved_piece')['move_eval_change'].mean().sort_values()
+        
+        # Plot for each phase on the specific subplot axis
+        sns.barplot(x=piece_stats.index, y=piece_stats.values, ax=ax, hue=piece_stats.index, palette='Reds_r', legend=False)
+        ax.set_title(f"Piece Performance in {phase} (Avg Eval Change)")
+        ax.set_xlabel("Piece")
+        ax.set_ylabel("Avg Eval Change")
+        ax.tick_params(axis='x', rotation=45)
+        
+    plt.tight_layout()
+    plt.show()
 
 def plot_time_vs_quality(df_moves):
     """Correlates time spent on move vs how good the move was."""
@@ -247,98 +252,182 @@ def analyze_castling(df_games):
     plt.tight_layout()
     plt.show()
 
-def analyze_blunders(df_moves):
+def analyze_blunders(df_moves, blunder_threshold=-200):
     """
     Identifies which pieces are most likely to be blundered.
     Blunder defined as eval drop < -200 (approx 2 pawns).
+    Separates blunders into two categories: those involving mate scores and normal eval drops.
     """
     player_moves = df_moves[df_moves['players_move'] == True]
     
     # Define blunder
-    BLUNDER_THRESHOLD = -200
-    blunders = player_moves[player_moves['move_eval_change'] < BLUNDER_THRESHOLD]
+    # Use copy to avoid SettingWithCopyWarning
+    blunders = player_moves[player_moves['move_eval_change'] < blunder_threshold].copy()
     
-    # 1. Likelihood: Blunders per move for each piece type
+    if blunders.empty:
+        print("No blunders found matching the threshold.")
+        return
+
+    # Determine if a blunder is mate-related.
+    # It is mate-related if:
+    # 1. The resulting position allows a mate (mate_possible is True).
+    # 2. Or if the evaluation swing is massive (implies previous position was mate or near-mate).
+    # Using 2000 as a cutoff (20 pawns) to distinguish "mate logic" scores from "positional" scores.
+    blunders['is_mate_involved'] = blunders['mate_possible'] | (blunders['move_eval_change'].abs() > 2000)
+    
+    blunders_no_mate = blunders[~blunders['is_mate_involved']]
+    blunders_mate = blunders[blunders['is_mate_involved']]
+
+    # 1. Likelihood: Blunders per move for each piece type (Overall)
     piece_move_counts = player_moves['moved_piece'].value_counts()
     piece_blunder_counts = blunders['moved_piece'].value_counts()
     
     blunder_rate = (piece_blunder_counts / piece_move_counts).sort_values(ascending=False)
     
     # 2. Severity: Average eval loss when blundering with that piece
-    blunder_severity = blunders.groupby('moved_piece')['move_eval_change'].mean().sort_values()
+    severity_no_mate = blunders_no_mate.groupby('moved_piece')['move_eval_change'].mean().sort_values()
+    severity_mate = blunders_mate.groupby('moved_piece')['move_eval_change'].mean().sort_values()
     
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     
+    # Plot 1: Frequency
     sns.barplot(x=blunder_rate.index, y=blunder_rate.values, ax=axes[0], hue=blunder_rate.index, palette='Reds', legend=False)
-    axes[0].set_title("Blunder Likelihood (Blunders / Total Moves)")
-    axes[0].set_ylabel("Frequency")
+    axes[0].set_title("Blunder Likelihood (Overall)")
+    axes[0].set_ylabel("Frequency (Blunders / Moves)")
     axes[0].tick_params(axis='x', rotation=45)
     
-    sns.barplot(x=blunder_severity.index, y=blunder_severity.values, ax=axes[1], hue=blunder_severity.index, palette='Reds_r', legend=False)
-    axes[1].set_title("Blunder Severity (Avg Eval Loss)")
-    axes[1].set_ylabel("Avg Centipawn Loss")
-    axes[1].tick_params(axis='x', rotation=45)
+    # Plot 2: Severity (No Mate)
+    if not severity_no_mate.empty:
+        sns.barplot(x=severity_no_mate.index, y=severity_no_mate.values, ax=axes[1], hue=severity_no_mate.index, palette='Reds_r', legend=False)
+        axes[1].set_title("Blunder Severity (No Mate Involved)")
+        axes[1].set_ylabel("Avg Centipawn Loss")
+        axes[1].tick_params(axis='x', rotation=45)
+    else:
+        axes[1].set_title("No non-mate blunders")
+
+    # Plot 3: Severity (Mate)
+    if not severity_mate.empty:
+        sns.barplot(x=severity_mate.index, y=severity_mate.values, ax=axes[2], hue=severity_mate.index, palette='Dark2_r', legend=False)
+        axes[2].set_title("Blunder Severity (Mate Involved)")
+        axes[2].set_ylabel("Avg Mate Distance (M)")
+        axes[2].tick_params(axis='x', rotation=45)
+        
+        # MATE_MAX assumes standard config from stockfish_eval.py (Depth 10 * 1000 = 10000)
+        MATE_MAX = int(os.getenv("STOCKFISH_DEPTH", 10)) * 1000 
+        
+        def mate_formatter(x, pos):
+            if x == 0: return "0"
+            val = abs(x)
+            # If value is very low (e.g. < 500), it's likely M20+ or noise, showing raw might be better
+            # But user asked for transformation. M20 is 500.
+            if val < 100: return f"{int(x)}"
+            
+            mate_in_x = MATE_MAX / val
+            # Since values are negative for blunders (axis goes down), we label it M...
+            # We can prefix with sign if we want, but "M2" usually implies the magnitude.
+            return f"M{mate_in_x:.1f}"
+
+        axes[2].yaxis.set_major_formatter(FuncFormatter(mate_formatter))
+
+    else:
+        axes[2].set_title("No mate blunders")
     
     plt.tight_layout()
     plt.show()
 
 def analyze_missed_mates(df_moves):
     """
-    Analyzes how many mates in one were missed.
-    Condition: Opponent's move left a 'Mate in 1' for me, but I didn't play 'best_move' 
-    (assuming best move was the mate).
+    Analyzes missed mate sequences.
+    Identifies positions where a forced mate was available (Mate in 1, 2, 3+)
+    and checks if the player failed to play the best move (missing the optimal mate).
     """
-    # Sort by game and move order to ensure correct sequence
+    # Sort by game and move order
     df_sorted = df_moves.sort_values(['game_url', 'move_order'])
     
-    missed_mates_count = 0
-    opportunities_count = 0
+    # We need to look at the state BEFORE the player's move.
+    # The 'pos_eval' and 'mate_in_moves' in our current row reflect the state AFTER the move.
+    # So we look at the PREVIOUS row (opponent's move) to see what the board looked like for the player.
     
-    # We need to look at pairs of moves: Opponent (Prev) -> Player (Curr)
-    # Shifted DataFrame to align Previous move with Current move
     df_sorted['prev_mate_possible'] = df_sorted['mate_possible'].shift(1)
     df_sorted['prev_mate_in_moves'] = df_sorted['mate_in_moves'].shift(1)
     df_sorted['prev_pos_eval'] = df_sorted['pos_eval'].shift(1)
     df_sorted['prev_game_url'] = df_sorted['game_url'].shift(1)
-    df_sorted['prev_players_move'] = df_sorted['players_move'].shift(1)
     
-    # Filter for:
-    # 1. Same game
-    # 2. Current move is Player's move
-    # 3. Previous move was Opponent's move (implied by 2 usually, but checked)
-    # 4. Previous state (after opponent move) was Mate in 1 for Player. 
-    #    - mate_possible == True
-    #    - mate_in_moves == 1
-    #    - pos_eval > 0 (Positive eval means advantage/mate for Player)
+    # Filter for Player's moves where a mate was possible in the previous state
+    # Positive eval for player means the mate is FOR the player.
+    # Note: Stockfish eval is usually relative to the side to move. 
+    # If prev move was opponent's, and eval is positive, it might mean opponent is winning? 
+    # Let's rely on 'pos_eval' from our data processing which standardizes eval for the analyzer user (as_white).
+    # If 'pos_eval' is positive, it's good for the player.
     
-    candidates = df_sorted[
+    mate_opportunities = df_sorted[
         (df_sorted['game_url'] == df_sorted['prev_game_url']) &
         (df_sorted['players_move'] == True) &
         (df_sorted['prev_mate_possible'] == True) &
-        (df_sorted['prev_mate_in_moves'] == 1) &
-        (df_sorted['prev_pos_eval'] > 0)
-    ]
+        (df_sorted['prev_pos_eval'] > 0) # Mate is for the player
+    ].copy()
     
-    opportunities_count = len(candidates)
+    if mate_opportunities.empty:
+        print("No forced mate opportunities found.")
+        return
+
+    # Categorize by Mate Distance
+    def get_mate_category(moves):
+        if moves == 1: return "Mate in 1"
+        if moves == 2: return "Mate in 2"
+        if moves == 3: return "Mate in 3"
+        return "Mate in 4+"
+
+    mate_opportunities['mate_type'] = mate_opportunities['prev_mate_in_moves'].apply(get_mate_category)
     
-    # Missed if I did NOT play the best move (assuming engine always finds the mate in 1 as best move)
-    missed = candidates[candidates['is_best_move'] == False]
-    missed_mates_count = len(missed)
+    # 1. Optimal Find: Player played the best move
+    mate_opportunities['found_optimal'] = mate_opportunities['is_best_move']
     
-    print(f"Mate in 1 Opportunities: {opportunities_count}")
-    print(f"Mate in 1 Missed: {missed_mates_count}")
+    # 2. Pattern Find: Player played a move that kept the forced mate (even if slower)
+    # Check if the resulting position (current row) is still a mate for the player
+    mate_opportunities['found_pattern'] = (
+        (mate_opportunities['mate_possible'] == True) & 
+        (mate_opportunities['pos_eval'] > 0)
+    )
+    # Note: If M1 was available, and you played a move that results in Mate, it's a win (game over).
+    # In 'is_game_over' case, pos_eval might be max, but mate_possible might be False/True depending on implementation.
+    # Let's check 'is_game_over' and result as well for M1 cases.
+    mate_opportunities.loc[mate_opportunities['is_game_over'] & (mate_opportunities['pos_eval'] > 0), 'found_pattern'] = True
+
+    # Aggregation
+    stats = mate_opportunities.groupby('mate_type').agg(
+        total=('game_url', 'count'),
+        found_optimal=('found_optimal', 'sum'),
+        found_pattern=('found_pattern', 'sum')
+    )
     
-    if opportunities_count > 0:
-        found_rate = ((opportunities_count - missed_mates_count) / opportunities_count) * 100
-        print(f"Mate in 1 Spotting Rate: {found_rate:.1f}%")
+    stats['optimal_rate'] = (stats['found_optimal'] / stats['total']) * 100
+    stats['pattern_rate'] = (stats['found_pattern'] / stats['total']) * 100
+    
+    print("\n--- Missed Mate Analysis ---")
+    print(stats[['total', 'found_optimal', 'found_pattern', 'optimal_rate', 'pattern_rate']])
+    
+    # Plotting
+    fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(8, 12))
+    
+    # 1. Optimal Rate %
+    sns.barplot(x=stats.index, y=stats['optimal_rate'], ax=axes[0], hue=stats.index, palette="viridis", legend=False)
+    axes[0].set_title("Optimal Mate Found Rate (%)")
+    axes[0].set_ylabel("Found Rate (%)")
+    axes[0].set_ylim(0, 100)
+    for i, v in enumerate(stats['optimal_rate']):
+        axes[0].text(i, v + 1, f"{v:.1f}%", ha='center')
         
-        plt.figure(figsize=(6, 6))
-        plt.pie([missed_mates_count, opportunities_count - missed_mates_count], 
-                labels=['Missed', 'Found'], autopct='%1.1f%%', colors=['red', 'green'])
-        plt.title("Mate in 1 Detection")
-        plt.show()
-    else:
-        print("No Mate in 1 opportunities found in the dataset.")
+    # 2. Pattern Rate %
+    sns.barplot(x=stats.index, y=stats['pattern_rate'], ax=axes[1], hue=stats.index, palette="Blues", legend=False)
+    axes[1].set_title("Mate Pattern Maintained Rate (%)")
+    axes[1].set_ylabel("Maintained Rate (%)")
+    axes[1].set_ylim(0, 100)
+    for i, v in enumerate(stats['pattern_rate']):
+        axes[1].text(i, v + 1, f"{v:.1f}%", ha='center')
+    
+    plt.tight_layout()
+    plt.show()
 
 def plot_opening_winrate(df_games, min_games=5):
     """Analyzes win rate by Opening (ECO)."""
