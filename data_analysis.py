@@ -145,9 +145,24 @@ def analyze_game_phases(df_moves):
     axes[0].set_ylabel("Avg Centipawn Change")
     
     # Plot Accuracy (% Best Moves)
-    sns.barplot(data=phase_stats_accuracy, x='phase', y='is_best_move', ax=axes[1], order=['Opening', 'Middlegame', 'Endgame'], hue='phase', palette='viridis', legend=False)
+    # Convert to percentage
+    phase_stats_accuracy['accuracy_pct'] = phase_stats_accuracy['is_best_move'] * 100
+    
+    sns.barplot(data=phase_stats_accuracy, x='phase', y='accuracy_pct', ax=axes[1], order=['Opening', 'Middlegame', 'Endgame'], hue='phase', palette='viridis', legend=False)
     axes[1].set_title("Move Accuracy (% Best Move) by Phase")
-    axes[1].set_ylabel("Accuracy (0-1)")
+    axes[1].set_ylabel("Accuracy (%)")
+    axes[1].set_ylim(0, 100)
+    
+    # Use the actual plotted values for labels to ensure match
+    for i, row in phase_stats_accuracy.iterrows():
+        # Match index to order
+        phase = row['phase']
+        if phase == 'Opening': x_pos = 0
+        elif phase == 'Middlegame': x_pos = 1
+        else: x_pos = 2
+        
+        val = row['accuracy_pct']
+        axes[1].text(x_pos, val + 1, f"{val:.1f}%", ha='center')
     
     plt.tight_layout()
     plt.show()
