@@ -70,12 +70,14 @@ def analyze_game(args):
 
 def eval_pgn(game_pgn, board, stockfish, as_white):
     moves = []
+    players_move = as_white
     last_eval = 0
     clock = {"w": None, "b": None}
 
     stockfish.set_fen_position(board.fen())
     for node in game_pgn.mainline():
         move = node.move
+        move_order = board.fullmove_number
         move_uci = move.uci()
         best_move_uci = stockfish.get_best_move()
         best_move_piece = get_piece_symbol(board, best_move_uci)
@@ -92,20 +94,22 @@ def eval_pgn(game_pgn, board, stockfish, as_white):
         pos_eval = transform_eval(stockfish_eval, as_white, board)
 
         moves.append({
-            "move_order": len(moves) + 1,
+            "move_order": move_order,
             "pos_eval": pos_eval,
             "move_eval_change": pos_eval - last_eval,
             "pieces_on_board": pieces_on_board,
             "mate_possible": stockfish_eval["type"] == "mate",
             "mate_in_moves": abs(stockfish_eval["value"]) if stockfish_eval["type"] == "mate" else 0,
+            "is_game_over": board.is_game_over(),
             "moved_piece": moved_piece,
             "best_move_piece": best_move_piece,
             "is_best_move": move.uci() == best_move_uci,
             "is_best_moved_piece": is_best_moved_piece,
             "time_used_sec": move_time,
             "time_on_clock_sec": clock[player],
-            "player": player,
+            "players_move": players_move,
         })
+        players_move = not players_move
         last_eval = pos_eval
 
     return moves
@@ -171,7 +175,7 @@ def parse_clk(comment):
 
 
 def transform_eval(eval_dict, as_white, board):
-    sign = 1 if eval_dict["value"] > 0 else -1
+    sign = 1 if eval_dict["value"] >= 0 else -1
     max_value = sign * (int(os.getenv("STOCKFISH_DEPTH", 10)) * 1000)
 
     if board.is_game_over():

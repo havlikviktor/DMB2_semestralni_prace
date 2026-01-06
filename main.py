@@ -40,10 +40,9 @@ def main():
             games_path = load_games(path)
 
         analyzed_path = os.getenv("ANALYZED_PATH")
-        if not os.path.isdir(games_path):
+        if not os.path.isdir(analyzed_path):
             analyzed_path = analyze_games(games_path, path, stockfish_path)
 
-        data_analysis.data_analysis(analyzed_path)
     else:
         print("CHESS_USER není nastaven v .env souboru.")
 
