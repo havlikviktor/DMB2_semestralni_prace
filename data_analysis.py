@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import seaborn as sns
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, ttest_ind, chi2_contingency, f_oneway
 
 # Set plot style
 sns.set_theme(style="whitegrid")
@@ -82,7 +82,7 @@ def plot_winrate_overall(df_games):
     plt.ylabel("Percentage (%)")
     plt.xlabel("Result")
     for i, v in enumerate(win_counts.values):
-        plt.text(i, v + 1, f"{v:.1f}%", ha='center')
+        plt.text(i, v + 0.3, f"{v:.1f}%", ha='center', va='bottom', fontweight='bold')
     plt.tight_layout()
     plt.show()
 
@@ -441,6 +441,116 @@ def analyze_missed_mates(df_moves):
     plt.tight_layout()
     plt.show()
 
+def analyze_strong_side(df_games, df_moves):
+    """
+    Comprehensive comparison between Player and Opponents.
+    1. ACPL (Average Centipawn Loss) Comparison.
+    2. Punishment Rate (Conversion of blunders).
+    3. Win Rate by Rating Difference.
+    """
+    print("\n--- Strong Side Analysis (Player vs Opponent) ---")
+    
+    # --- 1. ACPL Calculation ---
+    # Prepare data
+    # Player Loss: -move_eval_change (if change < 0)
+    # Opponent Loss: +move_eval_change (if change > 0)
+    # Clip at 1000 to avoid mate scores skewing averages
+    
+    df_moves['cp_loss'] = 0.0
+    
+    # Player moves: Loss is negative change
+    df_moves.loc[df_moves['players_move'] == True, 'cp_loss'] = \
+        -df_moves.loc[df_moves['players_move'] == True, 'move_eval_change']
+        
+    # Opponent moves: Loss is positive change (eval goes up for player)
+    df_moves.loc[df_moves['players_move'] == False, 'cp_loss'] = \
+        df_moves.loc[df_moves['players_move'] == False, 'move_eval_change']
+        
+    # Filter only positive losses (mistakes) and clip
+    df_moves['cp_loss'] = df_moves['cp_loss'].clip(lower=0, upper=1000)
+    
+    # Group by game and player
+    acpl_stats = df_moves.groupby(['game_url', 'players_move'])['cp_loss'].mean().unstack()
+    acpl_stats.rename(columns={True: 'Player_ACPL', False: 'Opponent_ACPL'}, inplace=True)
+    
+    # Merge with game result
+    acpl_stats = acpl_stats.merge(df_games[['game_url', 'is_win', 'player_result']], on='game_url')
+    
+    # Plot 1: ACPL Distribution
+    plt.figure(figsize=(10, 6))
+    sns.kdeplot(data=acpl_stats['Player_ACPL'], label='Me', fill=True, color='blue', alpha=0.3)
+    sns.kdeplot(data=acpl_stats['Opponent_ACPL'], label='Opponent', fill=True, color='red', alpha=0.3)
+    plt.title("Accuracy Comparison (Average Centipawn Loss)")
+    plt.xlabel("ACPL (Lower is Better)")
+    plt.xlim(0, 200) # Focus on normal range
+    plt.legend()
+    plt.show()
+    
+    print(f"My Avg ACPL: {acpl_stats['Player_ACPL'].mean():.2f}")
+    print(f"Opponent Avg ACPL: {acpl_stats['Opponent_ACPL'].mean():.2f}")
+    
+    # --- 2. Punishment Rate ---
+    # Did I win when opponent blundered? Did they win when I blundered?
+    # Blunder defined as > 300 cp loss in a single move
+    
+    # Identify games with blunders
+    blunder_games = df_moves[df_moves['cp_loss'] >= 300].groupby(['game_url', 'players_move']).size().unstack(fill_value=0)
+    blunder_games.rename(columns={True: 'My_Blunders', False: 'Opp_Blunders'}, inplace=True)
+    
+    # Merge with results
+    blunder_analysis = df_games[['game_url', 'is_win']].merge(blunder_games, on='game_url', how='left').fillna(0)
+    
+    # Scenarios
+    # A: Opponent Blundered at least once. Did I win?
+    opp_blundered = blunder_analysis[blunder_analysis['Opp_Blunders'] > 0]
+    punish_rate = opp_blundered['is_win'].mean() * 100 if not opp_blundered.empty else 0
+    
+    # B: I Blundered at least once. Did I LOSE? (is_win == False)
+    me_blundered = blunder_analysis[blunder_analysis['My_Blunders'] > 0]
+    # Assuming is_win False = Loss or Draw. Strictly "Punished" means I didn't win.
+    get_punished_rate = (1 - me_blundered['is_win'].mean()) * 100 if not me_blundered.empty else 0
+    
+    print(f"Punishment Rate (I win when they blunder): {punish_rate:.2f}%")
+    print(f"Survival Rate (I win even if I blunder): {100-get_punished_rate:.2f}%")
+    
+    plt.figure(figsize=(8, 6))
+    bars = plt.bar(['I Punish Them', 'They Punish Me'], [punish_rate, get_punished_rate], color=['green', 'orange'])
+    plt.title("Blunder Punishment Rate")
+    plt.ylabel("Win/Loss Rate (%)")
+    plt.ylim(0, 100)
+    for bar in bars:
+        plt.text(bar.get_x() + bar.get_width()/2, bar.get_height(), f'{bar.get_height():.1f}%', ha='center', va='bottom')
+    plt.show()
+    
+    # --- 3. Rating Difference Performance ---
+    df_games['rating_diff'] = df_games['player_rating'] - df_games['opponent_rating']
+    
+    # Bins
+    bins = [-float('inf'), -200, -100, -50, 50, 100, 200, float('inf')]
+    labels = ['<-200', '-200 to -100', '-100 to -50', 'Even (+/-50)', '+50 to +100', '+100 to +200', '>+200']
+    
+    df_games['rating_bucket'] = pd.cut(df_games['rating_diff'], bins=bins, labels=labels)
+    
+    rating_stats = df_games.groupby('rating_bucket', observed=False)['is_win'].agg(['mean', 'count'])
+    rating_stats['win_rate'] = rating_stats['mean'] * 100
+    
+    # Filter buckets with enough data
+    rating_stats = rating_stats[rating_stats['count'] > 5]
+    
+    plt.figure(figsize=(12, 6))
+    sns.barplot(x=rating_stats.index, y=rating_stats['win_rate'], hue=rating_stats.index, palette='RdYlGn', legend=False)
+    plt.title("Win Rate by Rating Difference")
+    plt.xlabel("Rating Difference (Me - Opponent)")
+    plt.ylabel("Win Rate (%)")
+    plt.axhline(50, color='black', linestyle='--')
+    plt.xticks(rotation=45)
+    
+    for i, v in enumerate(rating_stats['win_rate']):
+        plt.text(i, v + 0.3, f"{v:.1f}%", ha='center', va='bottom', fontweight='bold')
+        
+    plt.tight_layout()
+    plt.show()
+
 def plot_opening_winrate(df_games, min_games=5):
     """Analyzes win rate by Opening (ECO) and shows game counts on a secondary axis."""
     
@@ -620,3 +730,102 @@ def analyze_ragequits(df_games, df_moves, eval_threshold=500, time_threshold=10)
         plt.ylabel("Count")
         plt.tight_layout()
         plt.show()
+
+def test_time_pressure_vs_quality(df_moves):
+    """
+    Test 1: Time Pressure vs Move Quality
+    H0: Move quality (eval change) is the same for low time (<15s) and high time (>60s).
+    H1: Move quality is different.
+    """
+    print("\n[Statistical hypothesis test] Time Pressure vs Move Quality")
+    player_moves = df_moves[df_moves['players_move'] == True].copy()
+    
+    # Check available columns
+    if 'time_on_clock_sec' in player_moves.columns:
+        clock_col = 'time_on_clock_sec'
+        threshold_low = 30
+        threshold_high = 120
+        print(f"Using Clock Time: Low < {threshold_low}s, High > {threshold_high}s")
+    else:
+        # Fallback to time used if clock not tracked properly (though it should be)
+        clock_col = 'time_used_sec' 
+        threshold_low = 5
+        threshold_high = 60
+        print(f"Using Move Time: Fast < {threshold_low}s, Slow > {threshold_high}s")
+
+    group_pressure = player_moves[player_moves[clock_col] < threshold_low]['move_eval_change'].dropna()
+    group_calm = player_moves[player_moves[clock_col] > threshold_high]['move_eval_change'].dropna()
+    
+    if len(group_pressure) > 10 and len(group_calm) > 10:
+        stat, p_val = ttest_ind(group_pressure, group_calm, equal_var=False)
+        print(f"Samples: Pressure (n={len(group_pressure)}), Calm (n={len(group_calm)})")
+        print(f"Means: Pressure={group_pressure.mean():.2f}, Calm={group_calm.mean():.2f}")
+        print(f"T-test result: statistic={stat:.4f}, p-value={p_val:.4e}")
+        if p_val < 0.05:
+            print(">> REJECT H0: Significant difference in move quality found.")
+        else:
+            print(">> FAIL TO REJECT H0: No significant difference found.")
+    else:
+        print("Not enough data for Time Pressure test.")
+
+def test_color_advantage(df_games):
+    """
+    Test 2: Color Advantage (White vs Black Win Rate)
+    H0: Win/Loss distribution is independent of color.
+    H1: Win/Loss distribution depends on color.
+    """
+    print("\n[Statistical hypothesis test] White vs Black Advantage")
+    
+    # Contingency table: [ [White Wins, White Not-Wins], [Black Wins, Black Not-Wins] ]
+    white_games = df_games[df_games['as_white'] == True]
+    black_games = df_games[df_games['as_white'] == False]
+    
+    w_wins = white_games['is_win'].sum()
+    w_total = len(white_games)
+    b_wins = black_games['is_win'].sum()
+    b_total = len(black_games)
+    
+    if w_total > 0 and b_total > 0:
+        contingency = [
+            [w_wins, w_total - w_wins],
+            [b_wins, b_total - b_wins]
+        ]
+        stat, p_val, dof, expected = chi2_contingency(contingency)
+        
+        print(f"White Win Rate: {(w_wins/w_total)*100:.1f}% (n={w_total})")
+        print(f"Black Win Rate: {(b_wins/b_total)*100:.1f}% (n={b_total})")
+        print(f"Chi-Square result: statistic={stat:.4f}, p-value={p_val:.4e}")
+        if p_val < 0.05:
+            print(">> REJECT H0: Color significantly affects game result.")
+        else:
+            print(">> FAIL TO REJECT H0: No significant color advantage detected.")
+    else:
+        print("Not enough data for Color test.")
+
+def test_phase_accuracy(df_moves):
+    """
+    Test 3: Phase Accuracy (ANOVA)
+    H0: Mean move evaluation change is equal across Opening, Middlegame, Endgame.
+    H1: At least one phase has a different mean accuracy.
+    """
+    print("\n[Statistical hypothesis test] Accuracy by Game Phase (ANOVA)")
+    player_moves = df_moves[df_moves['players_move'] == True].copy()
+    
+    # Ensure phases are calculated
+    if 'phase' not in player_moves.columns:
+         player_moves['phase'] = player_moves.apply(classify_phase, axis=1)
+    
+    opening = player_moves[player_moves['phase'] == 'Opening']['move_eval_change'].dropna()
+    midgame = player_moves[player_moves['phase'] == 'Middlegame']['move_eval_change'].dropna()
+    endgame = player_moves[player_moves['phase'] == 'Endgame']['move_eval_change'].dropna()
+    
+    if len(opening) > 0 and len(midgame) > 0 and len(endgame) > 0:
+        print(f"Means: Opening={opening.mean():.2f}, Middlegame={midgame.mean():.2f}, Endgame={endgame.mean():.2f}")
+        stat, p_val = f_oneway(opening, midgame, endgame)
+        print(f"ANOVA result: statistic={stat:.4f}, p-value={p_val:.4e}")
+        if p_val < 0.05:
+            print(">> REJECT H0: Significant difference in accuracy between phases.")
+        else:
+            print(">> FAIL TO REJECT H0: Accuracy is consistent across phases.")
+    else:
+        print("Not enough data for Phase ANOVA.")
