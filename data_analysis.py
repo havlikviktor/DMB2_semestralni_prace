@@ -259,9 +259,6 @@ def analyze_blunders(df_moves, blunder_threshold=-200):
     Separates blunders into two categories: those involving mate scores and normal eval drops.
     """
     player_moves = df_moves[df_moves['players_move'] == True]
-    
-    # Define blunder
-    # Use copy to avoid SettingWithCopyWarning
     blunders = player_moves[player_moves['move_eval_change'] < blunder_threshold].copy()
     
     if blunders.empty:
@@ -430,9 +427,7 @@ def analyze_missed_mates(df_moves):
     plt.show()
 
 def plot_opening_winrate(df_games, min_games=5):
-    """Analyzes win rate by Opening (ECO)."""
-    # Extract just the category (e.g., C44 -> C) or use full ECO? 
-    # Using full ECO might be too granular. Let's try full ECO first but filter.
+    """Analyzes win rate by Opening (ECO) and shows game counts on a secondary axis."""
     
     opening_stats = df_games.groupby('eco').agg(
         games=('game_url', 'count'),
@@ -453,12 +448,91 @@ def plot_opening_winrate(df_games, min_games=5):
     else:
         subset = top_openings
 
-    plt.figure(figsize=(12, 6))
-    sns.barplot(x=subset.index, y=subset['win_rate'], hue=subset.index, palette="Spectral", legend=False)
-    plt.xticks(rotation=90)
-    plt.title(f"Win Rate by Opening ECO (min {min_games} games)")
-    plt.ylabel("Win Rate (%)")
-    plt.xlabel("ECO Code")
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    # Plot 1: Bar chart for Win Rate
+    sns.barplot(x=subset.index, y=subset['win_rate'], ax=ax1, hue=subset.index, palette="Spectral", legend=False, alpha=0.9)
+    ax1.set_xlabel("ECO Code")
+    ax1.set_ylabel("Win Rate (%)", color='tab:blue')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
+    ax1.set_title(f"Win Rate by Opening ECO (min {min_games} games) with Counts")
+    ax1.tick_params(axis='x')
+    ax1.set_ylim(0, 115) # Extra space for labels
+
+    # Plot 2: Line chart for Game Counts
+    ax2 = ax1.twinx()
+    sns.lineplot(
+        x=range(len(subset)),
+        y=subset['games'],
+        ax=ax2,
+        color='black',
+        marker='o',
+        linewidth=1
+    )
+    ax2.set_ylabel("Number of Games", color='black')
+    ax2.tick_params(axis='y', labelcolor='black')
+    
+    # Calculate offset for labels (5% of max games)
+    y_offset = subset['games'].max() * 0.01
+
+    # Add labels
+    for i, (idx, row) in enumerate(subset.iterrows()):
+        # Label on bar (Win Rate)
+        ax1.text(i, row['win_rate'] + 2, f"{row['win_rate']:.1f}%", ha='center', va='bottom', color='black', fontsize=9)
+        # Label on line (Count)
+        ax2.text(i, row['games'] + y_offset, f"{row['games']}", ha='center', va='bottom', color='black', fontsize=9)
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_most_played_openings(df_games, top_n=15):
+    """Plots the most frequently played openings (ECO) along with their win rates."""
+    # Get top N openings by count
+    opening_counts = df_games['eco'].value_counts().head(top_n)
+    
+    if opening_counts.empty:
+        print("No opening data available.")
+        return
+
+    # Calculate win rate for these specific openings
+    top_openings_df = df_games[df_games['eco'].isin(opening_counts.index)]
+    
+    stats = top_openings_df.groupby('eco').agg(
+        games=('game_url', 'count'),
+        wins=('is_win', 'sum')
+    )
+    stats['win_rate'] = (stats['wins'] / stats['games']) * 100
+    
+    # Reorder stats to match the order of opening_counts (descending by count)
+    stats = stats.reindex(opening_counts.index)
+
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    # Plot 1: Bar chart for Counts
+    sns.barplot(x=stats.index, y=stats['games'], ax=ax1, hue=stats.index, palette="viridis", legend=False, alpha=0.8)
+    ax1.set_xlabel("ECO Code")
+    ax1.set_ylabel("Number of Games", color='tab:blue')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
+    ax1.set_title(f"Top {top_n} Most Played Openings (Count vs Win Rate)")
+    ax1.tick_params(axis='x', rotation=45)
+
+    # Plot 2: Line chart for Win Rate
+    ax2 = ax1.twinx()
+    # sns.lineplot might try to sort x-axis, so we pass range(len) as x and set labels manually or trust seaborn with categorical
+    # Using pointplot or lineplot with categorical x usually works if data is set up right, but passing x=stats.index acts categorically in recent seaborn.
+    # To be safe against seaborn sorting, we plot against range
+    sns.lineplot(x=range(len(stats)), y=stats['win_rate'], ax=ax2, color='tab:red', marker='o', linewidth=2)
+    ax2.set_ylabel("Win Rate (%)", color='tab:red')
+    ax2.tick_params(axis='y', labelcolor='tab:red')
+    ax2.set_ylim(0, 105) # Little bit over 100 for labels
+
+    # Add count and winrate labels
+    for i, (idx, row) in enumerate(stats.iterrows()):
+        # Label on bar (Count)
+        ax1.text(i, row['games'], f"{row['games']}", ha='center', va='bottom', color='black', fontsize=9)
+        # Label on line (Win Rate)
+        ax2.text(i, row['win_rate'] + 2, f"{row['win_rate']:.1f}%", ha='center', va='bottom', color='tab:red', fontsize=9, fontweight='bold')
+        
     plt.tight_layout()
     plt.show()
 
