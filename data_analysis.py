@@ -97,23 +97,24 @@ def plot_country_winrate(df_games, min_games=5):
         wins=('is_win', 'sum')
     )
     country_stats['win_rate'] = (country_stats['wins'] / country_stats['games']) * 100
-
+    
     # Filter for countries with enough games
     country_stats = country_stats[country_stats['games'] >= min_games].sort_values('win_rate', ascending=False)
-
+    
     if country_stats.empty:
         print(f"No countries with at least {min_games} games found.")
         return
 
-    plt.figure(figsize=(12, 6))
-    sns.barplot(x=country_stats.index, y=country_stats['win_rate'], hue=country_stats.index, palette="coolwarm", legend=False)
-    plt.xticks(rotation=90)
+    # Use horizontal bar chart for better label readability
+    plt.figure(figsize=(10, len(country_stats) * 0.4 + 2))
+    sns.barplot(y=country_stats.index, x=country_stats['win_rate'], hue=country_stats.index, palette="coolwarm", legend=False)
     plt.title(f"Win Rate by Opponent Country (min {min_games} games)")
-    plt.ylabel("Win Rate (%)")
-    plt.xlabel("Country")
+    plt.xlabel("Win Rate (%)")
+    plt.ylabel("Country")
+    plt.xlim(0, 100)
+    plt.grid(axis='x', linestyle='--', alpha=0.7)
     plt.tight_layout()
     plt.show()
-
 def classify_phase(row):
     """Classifies the game phase based on pieces on board and move number."""
     # Heuristic: 
