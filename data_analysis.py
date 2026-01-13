@@ -111,7 +111,12 @@ def plot_country_winrate(df_games, min_games=5):
     plt.title(f"Win Rate by Opponent Country (min {min_games} games)")
     plt.xlabel("Win Rate (%)")
     plt.ylabel("Country")
-    plt.xlim(0, 100)
+    plt.xlim(0, 110) # Increased to make room for labels
+    
+    # Add percentage labels next to the bars
+    for i, v in enumerate(country_stats['win_rate']):
+        plt.text(v + 1, i, f"{v:.1f}%", va='center', fontweight='bold')
+        
     plt.grid(axis='x', linestyle='--', alpha=0.7)
     plt.tight_layout()
     plt.show()
@@ -173,7 +178,7 @@ def analyze_game_phases(df_moves):
     plt.show()
 
     phases = ['Opening', 'Middlegame', 'Endgame']
-    fig, axes = plt.subplots(3, 1, figsize=(10, 16))
+    fig, axes = plt.subplots(1, 3, figsize=(14, 6))
 
     for i, phase in enumerate(phases):
         ax = axes[i]
@@ -203,6 +208,7 @@ def plot_time_vs_quality(df_moves):
     # Filter out extreme outliers for visualization
     plot_data = player_moves[player_moves['time_used_sec'] < 120] # Moves under 2 mins
 
+    print("---------------------------------------------------------------------------")
     corr, _ = pearsonr(player_moves['time_used_sec'], player_moves['move_eval_change'])
     print(f"Correlation between Time Used and Move Quality (Eval Change): {corr:.4f}")
 
@@ -669,11 +675,8 @@ def plot_most_played_openings(df_games, top_n=15):
 
 def analyze_ragequits(df_games, df_moves, eval_threshold=500, time_threshold=10):
     """
-    Analyzes 'ragequits'.
-    Definitions:
-    1. Abandoned: Opponent result is 'abandoned' AND last evaluation is > eval_threshold (in player's favor).
-    2. Stall/Timeout: Opponent result is 'timeout' AND last evaluation is > eval_threshold AND 
-       opponent had > time_threshold seconds on their previous move.
+    Analyzes 'ragequits' and visualizes the proportion of ragequits vs non-ragequits
+    for both Abandoned and Timeout scenarios.
     """
     print(f"Analyzing Ragequits (Eval Threshold: {eval_threshold}, Time Threshold: {time_threshold}s)...")
 
@@ -681,7 +684,6 @@ def analyze_ragequits(df_games, df_moves, eval_threshold=500, time_threshold=10)
     last_moves = df_moves.sort_values('move_order').groupby('game_url').last()[['pos_eval', 'players_move']]
 
     # Get last move made by OPPONENT to check their clock (for timeout analysis)
-    # We want the opponent's clock time at the end of their last move.
     opp_moves = df_moves[df_moves['players_move'] == False]
     last_opp_moves = opp_moves.sort_values('move_order').groupby('game_url').last()[['time_on_clock_sec']]
     last_opp_moves.rename(columns={'time_on_clock_sec': 'opp_last_clock'}, inplace=True)
@@ -690,52 +692,50 @@ def analyze_ragequits(df_games, df_moves, eval_threshold=500, time_threshold=10)
     df_merged = df_games.merge(last_moves, on='game_url', how='left')
     df_merged = df_merged.merge(last_opp_moves, on='game_url', how='left')
 
-    # 1. Abandoned Ragequits
-    # Result is abandoned, and position is winning for player
+    # Abandoned Ragequits
     abandoned_rq = df_merged[
         (df_merged['opponent_result'] == 'abandoned') &
         (df_merged['pos_eval'] > eval_threshold)
     ]
+    abandoned_non_rq = df_merged[
+        (df_merged['opponent_result'] == 'abandoned') &
+        (df_merged['pos_eval'] <= eval_threshold)
+    ]
 
-    # 2. Timeout Ragequits (Stalling)
-    # Result is timeout, position winning, it was opponent's turn (last move by player), and they had time
+    # Timeout Ragequits (Stalled)
     timeout_rq = df_merged[
         (df_merged['opponent_result'] == 'timeout') &
         (df_merged['pos_eval'] > eval_threshold) &
-        (df_merged['players_move'] == True) & # Last recorded move was player's, so it was opponent's turn
+        (df_merged['players_move'] == True) &
         (df_merged['opp_last_clock'] > time_threshold)
     ]
+    timeout_non_rq = df_merged[
+        (df_merged['opponent_result'] == 'timeout') &
+        (
+            (df_merged['pos_eval'] <= eval_threshold) |
+            (df_merged['players_move'] == False) |
+            (df_merged['opp_last_clock'] <= time_threshold)
+        )
+    ]
 
-    total_games = len(df_games)
-    count_abandoned = len(abandoned_rq)
-    count_timeout = len(timeout_rq)
-    total_rq = count_abandoned + count_timeout
-    rq_rate = (total_rq / total_games) * 100
+    # Counts for visualization
+    data = {
+        'Abandoned': [len(abandoned_rq), len(abandoned_non_rq)],
+        'Timeout': [len(timeout_rq), len(timeout_non_rq)]
+    }
 
-    print(f"Total Games: {total_games}")
-    print(f"Ragequits detected: {total_rq} ({rq_rate:.2f}%)")
-    print(f"  - Abandoned in lost position: {count_abandoned}")
-    print(f"  - Stalled/Timeout in lost position (>10s left): {count_timeout}")
+    # Create a DataFrame for plotting
+    plot_df = pd.DataFrame(data, index=['Ragequit', 'Non-Ragequit'])
 
-    # Visualization
-    categories = ['Normal Games', 'Ragequits']
-    values = [total_games - total_rq, total_rq]
-
-    plt.figure(figsize=(8, 5))
-    plt.pie(values, labels=categories, autopct='%1.1f%%', colors=['lightgray', 'crimson'], startangle=140)
-    plt.title("Ragequit Percentage")
+    # Plot
+    plot_df.T.plot(kind='bar', stacked=True, figsize=(10, 6), color=['crimson', 'lightgray'])
+    plt.title("Proportion of Ragequits vs Non-Ragequits (Abandoned and Timeout)")
+    plt.ylabel("Count")
+    plt.xlabel("Scenario")
+    plt.xticks(rotation=0)
+    plt.legend(title="Category", loc='upper right')
+    plt.tight_layout()
     plt.show()
-
-    if total_rq > 0:
-        rq_types = ['Abandoned', 'Timeout (Stall)']
-        rq_counts = [count_abandoned, count_timeout]
-
-        plt.figure(figsize=(8, 5))
-        sns.barplot(x=rq_types, y=rq_counts, hue=rq_types, palette='Reds_r', legend=False)
-        plt.title("Ragequit Types")
-        plt.ylabel("Count")
-        plt.tight_layout()
-        plt.show()
 
 def test_time_pressure_vs_quality(df_moves):
     """
