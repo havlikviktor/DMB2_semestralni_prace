@@ -62,16 +62,46 @@ This project provides a full pipeline to:
 
 ## Configuration
 
-Create a `.env` file in the root directory with the following variables:
+Create a `.env` file in the root directory to configure the tool. Below are the variables used in the code:
 
 ```env
+# Mandatory: The Chess.com username whose games will be analyzed.
+# If not set, the program will terminate.
 CHESS_USER=your_chess_username
-STOCKFISH_DEPTH=15
-STOCKFISH_THREADS=4
-ANALYSIS_PROCESSES_COUNT=4
-FETCH_TIME_CONTROL=600
+
+# Optional: Directory for raw games. 
+# Defaults to "{CHESS_USER}_data/games" if not provided or if the path doesn't exist.
 GAMES_PATH=path/to/save/raw/games
+
+# Optional: Directory for analyzed games. 
+# Defaults to "{CHESS_USER}_data/games_analyzed" if not provided or if the path doesn't exist.
 ANALYZED_PATH=path/to/save/analyzed/games
+
+# Optional: The search depth for the Stockfish engine. 
+# Used in stockfish_eval.py for transform_eval (max_value calculation) and Stockfish initialization.
+# Defaults to 10 in some contexts, but initialized with 15 in analyze_game.
+STOCKFISH_DEPTH=15
+
+# Optional: Number of threads for the Stockfish engine.
+# Defaults to 1 if not set.
+STOCKFISH_THREADS=4
+
+# Optional: Number of parallel processes for analyzing archives.
+# Defaults to 1 if not set. Total CPU usage = ANALYSIS_PROCESSES_COUNT * STOCKFISH_THREADS.
+ANALYSIS_PROCESSES_COUNT=4
+
+# Optional: Number of parallel processes for fetching games from Chess.com.
+# Defaults to 1 if not set.
+FETCH_PROCESSES_COUNT=4
+
+# Optional: Time in milliseconds to wait between retries when hitting Chess.com rate limits (429).
+# Defaults to 1000ms if not set.
+FETCH_RETRY_WAIT_TIME=1000
+
+# Optional: Time control filter for fetching (e.g., "180" for 3 min blitz).
+# Also used as a fallback for move time calculations if %clk is missing.
+# Defaults to 180 if not set.
+FETCH_TIME_CONTROL=180
 ```
 
 ## Usage
